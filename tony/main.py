@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
+from sklearn.model_selection import GridSearchCV
 
 
 def read_data(datasets):
@@ -64,7 +65,7 @@ def xgbTrain(X_train, X_test, y_train, y_test):
     :param X_test: Testing sample-feature matrix
     :param y_train: Training labels
     :param y_test: Testing labels
-    :return: Trained Booster, train rmse list, test tmse list
+    :return: Trained Booster, train rmse list, test rmse list
     """
     xgdmat = xgb.DMatrix(X_train, label=y_train)
     testmat = xgb.DMatrix(X_test, label=y_test)
@@ -72,15 +73,51 @@ def xgbTrain(X_train, X_test, y_train, y_test):
     progress = dict()
     watchlist = [(xgdmat, 'train'), (testmat, 'test')]
 
-    param = {'max_depth':6, 'eta':0.01, 'verbosity':1, 'objective':'reg:squarederror', 'lambda':1}
+    param = {'max_depth':6, 'eta':0.1, 'verbosity':1, 'objective':'reg:squarederror', 'lambda':1}
 
-    gb = xgb.train(param, xgdmat, 1000, watchlist, evals_result=progress)
+    gb = xgb.train(param, xgdmat, 100, watchlist, evals_result=progress)
     testmat = xgb.DMatrix(X_test)
     y_pred = gb.predict(testmat)
     # print(f"prediction {y_pred}")
     # print(f"truth {y_test}")
     # print(progress)
     return gb, progress['train']['rmse'], progress['test']['rmse']
+
+
+def xgbTrainCV(X_train, X_test, y_train, y_test):
+    """
+    Trains an XGBoost model given training data.
+    :param X_train: Training sample-feature matrix
+    :param X_test: Testing sample-feature matrix
+    :param y_train: Training labels
+    :param y_test: Testing labels
+    :return: Trained Booster, train rmse list, test rmse list
+    """
+    xgdmat = xgb.DMatrix(X_train, label=y_train)
+    testmat = xgb.DMatrix(X_test, label=y_test)
+
+    cv_params = {'max_depth': [3, 5, 7], 'min_child_weight': [1, 3, 5]}
+    ind_params = {'learning_rate': 0.1, 'n_estimators': 1000, 'seed': 0, 'subsample': 0.8, 'colsample_bytree': 0.8,
+                  'objective': 'reg:squarederror'}
+    optimized_GBM = GridSearchCV(xgb.XGBRegressor(**ind_params),
+                                 cv_params,
+                                 scoring='neg_mean_squared_error', cv=5, n_jobs=-1)
+    optimized_GBM.fit(X_train, y_train)
+    print(optimized_GBM.error_score)
+
+    # progress = dict()
+    # watchlist = [(xgdmat, 'train'), (testmat, 'test')]
+    #
+    # param = {'max_depth':6, 'eta':0.1, 'verbosity':1, 'objective':'reg:squarederror', 'lambda':1}
+    #
+    # cv = xgb.cv(params=param, dtrain=xgdmat, num_boost_round=3000, nfold=5, metrics=['error'], early_stopping_rounds=100)
+    # print(cv)
+    # testmat = xgb.DMatrix(X_test)
+    # y_pred = gb.predict(testmat)
+    # # print(f"prediction {y_pred}")
+    # # print(f"truth {y_test}")
+    # # print(progress)
+    # return gb, progress['train']['rmse'], progress['test']['rmse']
 
 
 def plot_results(train_error, test_error, title=None):
@@ -107,10 +144,10 @@ def main():
 
     X, y = read_data(datasets)
     X_train, X_test, y_train, y_test = process_data(X, y, test_size=0.2, random_state=42)
-    gb, train_rmse, test_rmse = xgbTrain(X_train, X_test, y_train, y_test)
+    gb, train_rmse, test_rmse = xgbTrainCV(X_train, X_test, y_train, y_test)
     train_mse = [x ** 2 for x in train_rmse]
     test_mse = [x ** 2 for x in test_rmse]
-    plot_results(train_mse, test_mse, title="Plot")
+    # plot_results(train_mse[30:], test_mse[30:], title="Plot")
 
 
 if __name__ == "__main__":
