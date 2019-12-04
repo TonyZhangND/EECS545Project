@@ -5,74 +5,67 @@ from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 
 
-set1 = ('../data/ArOpt.csv', '../data/ArOptLabel.csv')
-set2 = ('../data/ArOpt15.csv', '../data/ArOpt15Label.csv')
-set3 = ('../data/Ar15.csv', '../data/Ar15Label.csv')
-set4 = ('../data/Ar25.csv', '../data/Ar25Label.csv')
-all = (set1, set2, set3, set4)
-features_to_use = np.array(range(15))
-np.random.shuffle(features_to_use)
-features_to_use = features_to_use[:3]
-
-
-def generate_data_matrix_full(data):
-    X = np.loadtxt(data[0], delimiter=',')
-    y = np.loadtxt(data[1], delimiter=',')
-
-    # Reduce the number of dimensions, pick some random columns
-    print(f"final {X.shape}")
-    return X/y.max(), y/y.max()
-
-
-def generate_data_matrix_random_features(data, cols):
-    X = np.loadtxt(data[0], delimiter=',')
-    y = np.loadtxt(data[1], delimiter=',')
-
-    # Reduce the number of dimensions, pick some random columns
-    columns = [X[:, c] for c in cols]
-    X = np.column_stack(columns)
-    print(f"final {X.shape}")
-    return X/y.max(), y/y.max()
-
-
-def generate_data_matrix_PCA(data, components):
-    X = np.loadtxt(data[0], delimiter=',')
-    y = np.loadtxt(data[1], delimiter=',')
-    pca = PCA(n_components=components)
-    pca.fit(X)
-    X = pca.transform(X)
-    print(f"final {X.shape}")
-    return X/y.max(), y/y.max()
-
-
-def generate_data_matrix_all_PCA():
-    data = [np.loadtxt(s[0], delimiter=',') for s in all]
-    labels = [np.loadtxt(s[1], delimiter=',') for s in all]
-    X = np.vstack(data)
-    y = np.concatenate(labels, axis=None)
-    pca = PCA(n_components=2)
-    pca.fit(X)
-    X = pca.transform(X)
-    return X/y.max(), y/y.max()
-
-
-def generate_data_matrix_all():
-    data = [np.loadtxt(s[0], delimiter=',') for s in all]
-    labels = [np.loadtxt(s[1], delimiter=',') for s in all]
+def read_data(datasets):
+    """
+    :param datasets: list containing (X.csv, y.csv) pairs
+    :return: pair (X, y) where X is the feature sample matrix and y is the label array from combining all data
+        in datasets
+    """
+    data = [np.loadtxt(s[0], delimiter=',') for s in datasets]
+    labels = [np.loadtxt(s[1], delimiter=',') for s in datasets]
     X = np.vstack(data)
     y = np.concatenate(labels, axis=None)
     return X, y
 
 
-def xgbTrain(X, y):
+def sphere(X_train, X_test):
     """
-    Partitions data into a train and test set, and trains an XGBoost model given training data.
-    :param X: Training data, 2D numpy array
-    :param y: Training labels, 1D numpy array
+    :param X_train: Sample-feature matrix to sphere
+    :param X_test: Sample-feature matrix to sphere according to mean and stdev of X_train
+    :return: Tuple containing (X_train_sphered, X_test_sphered)
+    """
+    X_train, X_test = X_train.T, X_test.T
+    a, b = X_train.shape
+    stdevs = [np.std(row) for row in X_train]  # standard deviation of each row in X
+    diag = np.diag([1 / s for s in stdevs])
+    X_train_sphered = diag.dot(X_train).dot(np.eye(b) - 1 / b * np.ones((b, b)))
+    sample_means = np.array([np.mean(row) for row in X_train])
+    sample_stds = np.array([np.std(row) for row in X_train])
+
+    # Now update X_test according to sample_means, sample_stds
+    a, b = X_test.shape
+    # print(f"X_test shape {X_test.shape}")
+    # print(f"means.shape {sample_means.shape}, stds.shape {sample_stds.shape}")
+    assert sample_stds.shape[0] == a and sample_means.shape[0] == a
+    X_test_sphered = X_test - np.column_stack([sample_means for i in range(b)])
+    X_test_sphered = X_test_sphered / np.column_stack([sample_stds for i in range(b)])
+    return X_train_sphered.T, X_test_sphered.T
+
+
+def process_data(X, y, test_size=0.2, random_state=42):
+    """
+    :param X: 2D numpy array containing all training samples
+    :param y: 1D numpy array containing all training labels corresponding to X
+    :param test_size: fraction of samples to use for training
+    :param random_state: seed for sklearn.model_selection.train_test_split
+    :return: (X_train, X_test, y_train, y_test) tuple
+    """
+    X_train, X_test, y_train, y_test = train_test_split(X, y/y.max(), test_size=test_size, random_state=random_state)
+    X_train, X_test = sphere(X_train, X_test)
+    assert X_train.shape[0] == y_train.shape[0]
+    assert X_test.shape[0] == y_test.shape[0]
+    return X_train, X_test, y_train, y_test
+
+
+def xgbTrain(X_train, X_test, y_train, y_test):
+    """
+    Trains an XGBoost model given training data.
+    :param X_train: Training sample-feature matrix
+    :param X_test: Testing sample-feature matrix
+    :param y_train: Training labels
+    :param y_test: Testing labels
     :return: Trained Booster, train rmse list, test tmse list
     """
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.4, random_state=42)
-    print(f"train shape X:{X_train.shape}, y:{y_train.shape}")
     xgdmat = xgb.DMatrix(X_train, label=y_train)
     testmat = xgb.DMatrix(X_test, label=y_test)
 
@@ -106,13 +99,18 @@ def plot_results(train_error, test_error, title=None):
 
 
 def main():
-    for s in all:
-        # X, y = generate_data_matrix_random_features(s, features_to_use)
-        # X, y = generate_data_matrix_full(s)
-        X, y = generate_data_matrix_PCA(s, 5)
-        # X, y = generate_data_matrix_all_PCA()
-        gb, train_error, test_error = xgbTrain(X, y)
-        plot_results(train_error, test_error, title=s[0])
+    set1 = ('../data/ArOpt.csv', '../data/ArOptLabel.csv')
+    set2 = ('../data/ArOpt15.csv', '../data/ArOpt15Label.csv')
+    set3 = ('../data/Ar15.csv', '../data/Ar15Label.csv')
+    set4 = ('../data/Ar25.csv', '../data/Ar25Label.csv')
+    datasets = (set1, set2, set3, set4)
+
+    X, y = read_data(datasets)
+    X_train, X_test, y_train, y_test = process_data(X, y, test_size=0.2, random_state=42)
+    gb, train_rmse, test_rmse = xgbTrain(X_train, X_test, y_train, y_test)
+    train_mse = [x ** 2 for x in train_rmse]
+    test_mse = [x ** 2 for x in test_rmse]
+    plot_results(train_mse, test_mse, title="Plot")
 
 
 if __name__ == "__main__":
