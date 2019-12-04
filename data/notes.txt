@@ -1,0 +1,2 @@
+Each *.csv file is a 2D-array of zernike polynomials extract from the corresponding raw data.
+Each 2D-array is in n*15, where n is the number of shots and 15 being the first 15 orders of Zernike.
