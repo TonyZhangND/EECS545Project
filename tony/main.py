@@ -2,6 +2,7 @@ import xgboost as xgb
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
+import operator
 from sklearn.decomposition import PCA
 from sklearn.model_selection import GridSearchCV
 
@@ -58,81 +59,66 @@ def process_data(X, y, test_size=0.2, random_state=42):
     return X_train, X_test, y_train, y_test
 
 
-def xgbTrain(X_train, X_test, y_train, y_test):
+def xgbTrain(X_train, X_test, y_train, y_test, my_params):
     """
     Trains an XGBoost model given training data.
     :param X_train: Training sample-feature matrix
     :param X_test: Testing sample-feature matrix
     :param y_train: Training labels
     :param y_test: Testing labels
+    :param my_params: parameters for XGBoost
     :return: Trained Booster, train rmse list, test rmse list
     """
     xgdmat = xgb.DMatrix(X_train, label=y_train)
     testmat = xgb.DMatrix(X_test, label=y_test)
 
+    # Train final booster
     progress = dict()
     watchlist = [(xgdmat, 'train'), (testmat, 'test')]
-
-    param = {'max_depth':6, 'eta':0.1, 'verbosity':1, 'objective':'reg:squarederror', 'lambda':1}
-
-    gb = xgb.train(param, xgdmat, 100, watchlist, evals_result=progress)
-    testmat = xgb.DMatrix(X_test)
-    y_pred = gb.predict(testmat)
-    # print(f"prediction {y_pred}")
-    # print(f"truth {y_test}")
-    # print(progress)
+    gb = xgb.train(my_params, xgdmat, 30000, watchlist, evals_result=progress, early_stopping_rounds=50)
+    # testmat = xgb.DMatrix(X_test)
+    # y_pred = gb.predict(testmat)
     return gb, progress['train']['rmse'], progress['test']['rmse']
 
 
-def xgbTrainCV(X_train, X_test, y_train, y_test):
+def nFoldCV(n, cv_params, ind_params, X_train, y_train):
     """
-    Trains an XGBoost model given training data.
+    Performs cross-validation to tune the hyperparameters of XGBoost
+    :param n: Number of cv folds
+    :param cv_params: Parameters to do grid search
+    :param ind_params: Fixed parameters
     :param X_train: Training sample-feature matrix
-    :param X_test: Testing sample-feature matrix
     :param y_train: Training labels
-    :param y_test: Testing labels
-    :return: Trained Booster, train rmse list, test rmse list
+    :return: Best parameters for XGBoost
     """
-    xgdmat = xgb.DMatrix(X_train, label=y_train)
-    testmat = xgb.DMatrix(X_test, label=y_test)
-
-    cv_params = {'max_depth': [3, 5, 7], 'min_child_weight': [1, 3, 5]}
-    ind_params = {'learning_rate': 0.1, 'n_estimators': 1000, 'seed': 0, 'subsample': 0.8, 'colsample_bytree': 0.8,
-                  'objective': 'reg:squarederror'}
     optimized_GBM = GridSearchCV(xgb.XGBRegressor(**ind_params),
                                  cv_params,
-                                 scoring='neg_mean_squared_error', cv=5, n_jobs=-1)
+                                 scoring='neg_mean_squared_error', cv=n, n_jobs=-1)
     optimized_GBM.fit(X_train, y_train)
-    print(optimized_GBM.error_score)
-
-    # progress = dict()
-    # watchlist = [(xgdmat, 'train'), (testmat, 'test')]
-    #
-    # param = {'max_depth':6, 'eta':0.1, 'verbosity':1, 'objective':'reg:squarederror', 'lambda':1}
-    #
-    # cv = xgb.cv(params=param, dtrain=xgdmat, num_boost_round=3000, nfold=5, metrics=['error'], early_stopping_rounds=100)
-    # print(cv)
-    # testmat = xgb.DMatrix(X_test)
-    # y_pred = gb.predict(testmat)
-    # # print(f"prediction {y_pred}")
-    # # print(f"truth {y_test}")
-    # # print(progress)
-    # return gb, progress['train']['rmse'], progress['test']['rmse']
+    return optimized_GBM.best_params_
 
 
 def plot_results(train_error, test_error, title=None):
     legends = ('train', 'test')
     plt.plot(list(range(len(train_error))), train_error)
     plt.plot(list(range(len(test_error))), test_error)
+    # plt.yscale('log')
     plt.title(title)
     plt.xlabel('iteration')
-    plt.ylabel('rmse')
+    plt.ylabel('mse')
     plt.legend(legends, loc='upper right')
     # plt.axes().yaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(0.05))
     # plt.axes().xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(20))
     # plt.axes().xaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(100000))
     plt.grid(which='both', axis='both')
     plt.show()
+
+
+def do_importance(m):
+    sorted_m = sorted(m.items(), key=operator.itemgetter(1))
+    sorted_m.reverse()
+    print(sorted_m)
+
 
 
 def main():
@@ -144,10 +130,39 @@ def main():
 
     X, y = read_data(datasets)
     X_train, X_test, y_train, y_test = process_data(X, y, test_size=0.2, random_state=42)
-    gb, train_rmse, test_rmse = xgbTrainCV(X_train, X_test, y_train, y_test)
+    # cv_params = {'max_depth': [9],
+    #              'min_child_weight': [9],
+    #              'subsample': [0.9],
+    #              'colsample_bytree': [0.9],
+    #              'learning_rate': [0.1]
+    #              }
+    cv_params1 = {'max_depth': [5, 7, 9],
+                  'min_child_weight': [5, 7, 9],
+                  'subsample': [0.7, 0.8, 0.9],
+                  'colsample_bytree': [0.7, 0.8, 0.9],
+                  'learning_rate': [0.01, 0.05, 0.1],
+                  'alpha': [1, 10, 20]
+                  }
+    ind_params = {
+        # 'learning_rate': 0.1,
+                  'n_estimators': 1000,
+                  'seed': 0,
+                  # 'subsample': 0.8,
+                  # 'colsample_bytree': 0.8,
+                  'objective': 'reg:squarederror'
+                  }
+    print("Performing cross validation")
+    # my_params = nFoldCV(5, cv_params1, ind_params, X_train, y_train)
+    my_params = {'alpha': 1, 'colsample_bytree': 0.7, 'learning_rate': 0.01, 'max_depth': 5, 'min_child_weight': 5, 'subsample': 0.8}
+    print(f"CV results {my_params}")
+    for (k, v) in ind_params.items():
+        my_params[k] = v
+    print("Training XGBoost using cv results")
+    gb, train_rmse, test_rmse = xgbTrain(X_train, X_test, y_train, y_test, my_params)
+    do_importance(gb.get_score(importance_type='gain'))
     train_mse = [x ** 2 for x in train_rmse]
     test_mse = [x ** 2 for x in test_rmse]
-    # plot_results(train_mse[30:], test_mse[30:], title="Plot")
+    plot_results(train_mse, test_mse, title="Plot")
 
 
 if __name__ == "__main__":
