@@ -1,3 +1,4 @@
+import matplotlib
 import xgboost as xgb
 import numpy as np
 import matplotlib.pyplot as plt
@@ -75,10 +76,11 @@ def xgbTrain(X_train, X_test, y_train, y_test, my_params):
     # Train final booster
     progress = dict()
     watchlist = [(xgdmat, 'train'), (testmat, 'test')]
-    gb = xgb.train(my_params, xgdmat, 30000, watchlist, evals_result=progress, early_stopping_rounds=50)
-    # testmat = xgb.DMatrix(X_test)
-    # y_pred = gb.predict(testmat)
-    return gb, progress['train']['rmse'], progress['test']['rmse']
+    gb = xgb.train(my_params, xgdmat, 20000, watchlist, evals_result=progress, early_stopping_rounds=50)
+    testmat = xgb.DMatrix(X_test)
+    y_train_pred = gb.predict(xgdmat)
+    y_test_pred = gb.predict(testmat)
+    return gb, progress['train']['rmse'], progress['test']['rmse'], y_train_pred, y_test_pred
 
 
 def nFoldCV(n, cv_params, ind_params, X_train, y_train):
@@ -100,17 +102,29 @@ def nFoldCV(n, cv_params, ind_params, X_train, y_train):
 
 def plot_results(train_error, test_error, title=None):
     legends = ('train', 'test')
-    plt.plot(list(range(len(train_error))), train_error)
-    plt.plot(list(range(len(test_error))), test_error)
+    plt.plot(list(range(len(train_error))), train_error, color='blue')
+    plt.plot(list(range(len(test_error))), test_error, color='red')
     # plt.yscale('log')
-    plt.title(title)
+    if title:
+        plt.title(title)
     plt.xlabel('iteration')
     plt.ylabel('mse')
     plt.legend(legends, loc='upper right')
-    # plt.axes().yaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(0.05))
-    # plt.axes().xaxis.set_major_locator(matplotlib.ticker.MultipleLocator(20))
-    # plt.axes().xaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(100000))
-    plt.grid(which='both', axis='both')
+    plt.axes().yaxis.set_minor_locator(matplotlib.ticker.MultipleLocator(0.01))
+    # plt.grid(which='both', axis='both')
+    plt.show()
+
+
+def plot(y, yTestReal, prediction, y_predict):
+    xx = np.linspace(0, 1, 100)
+    yy = np.linspace(0, 1, 100)
+    plt.clf()
+    plt.plot(xx, yy, label='y=x')
+    plt.xlabel('y_real')
+    plt.ylabel('y_predict')
+    plt.plot(y, prediction, '.', label='train')
+    plt.plot(yTestReal, y_predict, 'o', label='test')
+    plt.legend()
     plt.show()
 
 
@@ -158,11 +172,12 @@ def main():
     for (k, v) in ind_params.items():
         my_params[k] = v
     print("Training XGBoost using cv results")
-    gb, train_rmse, test_rmse = xgbTrain(X_train, X_test, y_train, y_test, my_params)
+    gb, train_rmse, test_rmse, y_train_pred, y_test_pred = xgbTrain(X_train, X_test, y_train, y_test, my_params)
     do_importance(gb.get_score(importance_type='gain'))
     train_mse = [x ** 2 for x in train_rmse]
     test_mse = [x ** 2 for x in test_rmse]
-    plot_results(train_mse, test_mse, title="Plot")
+    plot_results(train_mse, test_mse, title=None)
+    plot(y_train, y_test, y_train_pred, y_test_pred)
 
 
 if __name__ == "__main__":
